@@ -49,6 +49,14 @@ SOURCES: list[tuple[str, str, str]] = [
      "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum"
      "&timezone=Asia%2FSeoul" + ERA5),
 
+    ("seoul_snow.json",
+     "서울 일별 강설량 1990~2024 (Open-Meteo Archive · ERA5 고정)",
+     "https://archive-api.open-meteo.com/v1/archive"
+     f"?latitude={SEOUL[0]}&longitude={SEOUL[1]}"
+     "&start_date=1990-01-01&end_date=2024-12-31"
+     "&daily=snowfall_sum"
+     "&timezone=Asia%2FSeoul" + ERA5),
+
     ("seoul_air.json",
      "서울 시간별 미세먼지 2023~2024 (Open-Meteo Air Quality · CAMS)",
      "https://air-quality-api.open-meteo.com/v1/air-quality"

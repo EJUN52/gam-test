@@ -120,6 +120,13 @@
       "title": "얼마나 오래 사나",
       "blurb": "나라별 기대수명 1950~현재",
       "source": "Our World in Data"
+    },
+    {
+      "id": "seoul-snow",
+      "emoji": "❄️",
+      "title": "서울의 눈은 줄었나",
+      "blurb": "1990년부터 2024년까지, 서울의 하루 강설량",
+      "source": "Open-Meteo Archive (ERA5 재분석)"
     }
   ]
 }

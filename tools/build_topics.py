@@ -631,6 +631,91 @@ topic(
                "내가 사는 곳의 수준을 세계 평균으로 착각하기 쉽습니다."),
     ])
 
+# ── 11. 눈 ───────────────────────────────────────────────────────
+# '눈 온 날' = 하루 강설량 1cm 이상. 모델 값이라 0.01cm 같은 부스러기가 많아
+# 기준 없이 세면 일수가 부풀려진다.
+_s = load_json("seoul_snow.json")["daily"]
+S = [{"d": dt.date.fromisoformat(t), "snow": v}
+     for t, v in zip(_s["time"], _s["snowfall_sum"])]
+SNOW = [x for x in S if x["snow"] >= 1]
+s_years = S[-1]["d"].year - S[0]["d"].year + 1
+snow_avg = len(SNOW) / s_years
+per_year = {y: sum(1 for x in SNOW if x["d"].year == y)
+            for y in range(S[0]["d"].year, S[-1]["d"].year + 1)}
+snow_90s = mean(per_year[y] for y in range(1990, 2000))
+snow_10s = mean(per_year[y] for y in range(2015, 2025))
+s_ratio = snow_10s / snow_90s
+max_snow = max(S, key=lambda x: x["snow"])
+snow_day_avg = mean(x["snow"] for x in SNOW)
+snow_month = Counter(x["d"].month for x in SNOW)
+top_snow_m = max((12, 1, 2, 3), key=snow_month.get)
+
+# 첫눈은 겨울 시즌(7월 1일 ~ 이듬해 6월 30일) 단위로 센다. 1990/91 ~ 2023/24 =
+# 34시즌. 2024/25 는 12월 31일에서 자료가 끊겨 완전한 시즌이 아니라 뺀다
+seasons = range(S[0]["d"].year, S[-1]["d"].year)
+first_off = [(min(x["d"] for x in SNOW
+                  if dt.date(y, 7, 1) <= x["d"] < dt.date(y + 1, 7, 1))
+              - dt.date(y, 7, 1)).days for y in seasons]
+# 윤년이 아닌 해(2001/02)의 7월 1일에 얹어 날짜로 바꾼다
+first_avg = dt.date(2001, 7, 1) + dt.timedelta(days=round(mean(first_off)))
+first_early = dt.date(2001, 7, 1) + dt.timedelta(days=min(first_off))
+first_late = dt.date(2001, 7, 1) + dt.timedelta(days=max(first_off))
+first_after_newyear = sum(1 for o in first_off
+                          if o >= (dt.date(2002, 1, 1) - dt.date(2001, 7, 1)).days)
+# 보기는 상순(1~10일) · 중순(11~20일) · 하순(21일~)
+first_band = (f"{first_avg.month}월 "
+              f"{'상순' if first_avg.day <= 10 else '중순' if first_avg.day <= 20 else '하순'}")
+
+topic(
+    "seoul-snow", "❄️", "서울의 눈은 줄었나",
+    "1990년부터 2024년까지, 서울의 하루 강설량",
+    "Open-Meteo Archive (ERA5 재분석)", "https://open-meteo.com/",
+    [
+        slider("s1", "1990~2024년 서울에서 눈이 1cm 이상 온 날은 1년에 평균 며칠일까요?",
+               snow_avg, "일", 0, 30, 1,
+               f"{S[0]['d'].year}~{S[-1]['d'].year}년 {s_years}년 동안 하루 강설량 "
+               f"1cm 이상인 날 {len(SNOW)}일 ÷ {s_years}년 = 연평균 {snow_avg:.1f}일",
+               f"해마다 차이가 큽니다. 가장 적은 해는 {min(per_year.values())}일, "
+               f"가장 많은 해는 {max(per_year.values())}일입니다."),
+        # 경계: 1.1배 이상 늘었다 · 0.9~1.1 거의 같다 · 0.5~0.9 조금 줄었다 · 0.5 미만 절반 아래로
+        choice("s2", "1990년대와 비교해 2015~2024년, 한 해 눈(1cm 이상) 온 날은 "
+                     "어떻게 달라졌을까요?",
+               ["늘었다", "거의 같다", "조금 줄었다", "절반 아래로 줄었다"],
+               "늘었다" if s_ratio >= 1.1 else "거의 같다" if s_ratio >= 0.9
+               else "조금 줄었다" if s_ratio >= 0.5 else "절반 아래로 줄었다",
+               f"하루 강설량 1cm 이상인 날을 연도별로 세어 평균하면 1990~1999년 "
+               f"{snow_90s:.1f}일 → 2015~2024년 {snow_10s:.1f}일 ({s_ratio:.2f}배)",
+               f"가장 많았던 해는 1990~1999년 {max(range(1990, 2000), key=per_year.get)}년 "
+               f"{max(per_year[y] for y in range(1990, 2000))}일, 2015~2024년 "
+               f"{max(range(2015, 2025), key=per_year.get)}년 "
+               f"{max(per_year[y] for y in range(2015, 2025))}일입니다."),
+        slider("s3", "1990~2024년 서울에서 하루에 내린 눈의 최대 기록은?",
+               max_snow["snow"], "cm", 0, 40, 1,
+               f"1990~2024년 매일의 강설량 중 가장 큰 값은 "
+               f"{max_snow['d']:%Y년 %m월 %d일} {max_snow['snow']:.1f}cm",
+               f"1cm 이상 눈 온 날의 평균 강설량은 {snow_day_avg:.1f}cm로, "
+               f"최대 기록의 {snow_day_avg / max_snow['snow'] * 100:.0f}%입니다."),
+        choice("s4", "1990~2024년 서울에서 눈이 1cm 이상 온 날이 가장 많았던 달은?",
+               ["12월", "1월", "2월", "3월"], f"{top_snow_m}월",
+               "1990~2024년 하루 강설량 1cm 이상인 날을 달별로 세면 "
+               + " · ".join(f"{m}월 {snow_month[m]}일" for m in (12, 1, 2, 3)),
+               f"{top_snow_m}월 한 달에 1cm 이상 눈 온 날 {len(SNOW)}일 중 "
+               f"{snow_month[top_snow_m] / len(SNOW) * 100:.0f}%가 몰려 있습니다. "
+               f"보기 밖의 달은 11월 {snow_month[11]}일 · 4월 {snow_month[4]}일입니다."),
+        choice("s5", f"{len(first_off)}개 겨울(1990/91~2023/24) 동안 서울의 평균 "
+                     "첫눈(1cm 이상) 날짜는?",
+               ["11월 하순", "12월 상순", "12월 중순", "12월 하순"], first_band,
+               f"겨울 시즌(7월~이듬해 6월)마다 하루 강설량 1cm 이상인 첫날을 찾아 "
+               f"{len(first_off)}시즌 평균하면 {first_avg:%m월 %d일} "
+               f"(가장 이른 해 {first_early:%m월 %d일} · 가장 늦은 해 "
+               f"{first_late:%m월 %d일})",
+               f"{len(first_off)}시즌 중 {first_after_newyear}시즌은 1cm 이상 첫눈이 "
+               "해를 넘겨 1월 이후에 왔습니다."),
+    ],
+    caveat="ERA5 재분석의 강설량은 모델이 계산한 값이라 기상청 서울 관측소의 "
+           "적설과 다릅니다. 기상청의 '첫눈'은 쌓이지 않아도 눈발이 처음 관측된 "
+           "날이라, 여기서 센 '1cm 이상 첫날'과 기준이 다릅니다.")
+
 
 # ════════════════════════════════════════════════════════════════
 def main() -> None:
@@ -676,7 +761,8 @@ def main() -> None:
     }, ensure_ascii=False, indent=2))
 
     # 사람이 읽는 정답지
-    md = ["# 문항 정답지 — 10주제 50문항", "",
+    md = [f"# 문항 정답지 — {len(TOPICS)}주제 "
+          f"{sum(len(t['questions']) for t in TOPICS)}문항", "",
           "> 모든 값은 `data/raw/` 의 원본에서 `tools/build_topics.py` 가 계산합니다.", ""]
     for t in TOPICS:
         md += [f"## {t['emoji']} {t['title']}", "",
