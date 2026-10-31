@@ -134,6 +134,12 @@ SOURCES: list[tuple[str, str, str]] = [
      "https://bulks-faostat.fao.org/production/"
      "Trade_CropsLivestock_E_All_Data_(Normalized).zip"),
 
+    # 빅맥 지수. 이코노미스트가 GitHub 에 공개한 CSV — 해마다 두 번(1월·7월) 조사가 더해진다
+    ("bigmac.csv",
+     "나라별 빅맥 가격 2000~ (The Economist Big Mac Index · GitHub)",
+     "https://raw.githubusercontent.com/TheEconomist/big-mac-data/master/"
+     "output-data/big-mac-full-index.csv"),
+
     ("wb_pop_all.json",
      "나라별 전체 인구 1961~2024 (World Bank SP.POP.TOTL)",
      "https://api.worldbank.org/v2/country/all/indicator/SP.POP.TOTL"

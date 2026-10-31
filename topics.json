@@ -59,6 +59,13 @@
       "source": "FAO FAOSTAT"
     },
     {
+      "id": "fruit-or-not",
+      "emoji": "🍉",
+      "title": "설마 이것도 과일?",
+      "blurb": "유엔 상품분류로 본 과일과 채소, 그리고 세계 생산량",
+      "source": "FAO FAOSTAT (유엔 상품분류 CPC)"
+    },
+    {
       "id": "korea-rank",
       "emoji": "🧺",
       "title": "설마 한국이?",
@@ -68,9 +75,16 @@
     {
       "id": "coffee-korea",
       "emoji": "☕",
-      "title": "커피공화국 한국",
+      "title": "설마, 커피공화국?",
       "blurb": "한국이 들여온 커피, 2006년과 2024년",
       "source": "FAO FAOSTAT · World Bank"
+    },
+    {
+      "id": "bigmac",
+      "emoji": "🍔",
+      "title": "빅맥으로 본 세계 물가",
+      "blurb": "빅맥 한 개로 본 세계 물가, 2000년부터 2026년까지",
+      "source": "The Economist Big Mac Index"
     },
     {
       "id": "animals",

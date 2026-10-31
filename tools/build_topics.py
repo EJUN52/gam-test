@@ -916,6 +916,8 @@ FAO = {}                                    # (나라, 연도, 동물) → (마�
 # 배추(양배추 포함) 358 · 딸기 544 · 쌀(벼) 27 · 달걀 1062
 PROD_ITEMS = {"486", "592", "656", "661", "515", "587", "358", "544", "27", "1062"}
 PROD = collections.defaultdict(lambda: collections.defaultdict(list))
+# 세계 합계(지역코드 5000)의 품목별 생산량 — 과일·채소 순위에 쓴다. 연도 → 품목 → 줄
+WORLD = collections.defaultdict(dict)
 with zipfile.ZipFile(RAW / "fao_qcl.zip") as _z, \
         _z.open("Production_Crops_Livestock_E_All_Data_(Normalized).csv") as _f:
     for x in csv.DictReader(io.TextIOWrapper(_f, encoding="utf-8")):
@@ -924,6 +926,11 @@ with zipfile.ZipFile(RAW / "fao_qcl.zip") as _z, \
             PROD[x["Item Code"]][int(x["Year"])].append(
                 {"code": int(x["Area Code"]), "area": x["Area"],
                  "value": float(x["Value"]), "flag": x["Flag"]})
+        if (x["Area Code"] == "5000" and x["Element"] == "Production"
+                and x["Unit"] == "t" and x["Value"]):
+            WORLD[int(x["Year"])][x["Item"]] = {
+                "cpc": x["Item Code (CPC)"].lstrip("'"), "value": float(x["Value"]),
+                "flag": x["Flag"]}
         if (x["Element"] == "Stocks" and x["Area"] in FAO_ISO
                 and x["Item"] in LIVESTOCK and x["Year"] in ("1961", "2024")
                 and x["Value"]):
@@ -1210,7 +1217,7 @@ assert 0 <= green_x <= 10 and 0 <= kg_pp <= 10 and 0 <= roast_x <= 30, \
     "정답이 슬라이더 범위 밖입니다"
 
 topic(
-    "coffee-korea", "☕", "커피공화국 한국",
+    "coffee-korea", "☕", "설마, 커피공화국?",
     f"한국이 들여온 커피, 2006년과 {P_YEAR}년",
     "FAO FAOSTAT · World Bank", "https://www.fao.org/faostat/",
     [
@@ -1255,12 +1262,180 @@ topic(
            f"{imp_rank_of(2022)}위 · {P_YEAR}년 {k_imp + 1}위로 해마다 바뀌므로 관세청·"
            "커피협회 발표나 '1인당 소비' 순위와 다를 수 있습니다.")
 
+# ── 18. 빅맥으로 본 세계 물가 ────────────────────────────────────
+# 이코노미스트 빅맥 지수. 'Euro area'(유로 지역)는 나라가 아니라 묶음이라 순위·개수에서
+# 뺀다. 가장 비싼·싼 나라는 묻지 않는다 — 2026년 7월 1·2위(스위스·우루과이)가 1% 차이고
+# 가장 싼 나라는 조사 때마다 바뀌었다. 순위와 개수는 최근 세 번 조사가 모두 같은 보기에
+# 들어가도록 경계를 정했고, 아래에서 그 세 번을 다시 확인한다.
+BM = load_csv("bigmac.csv")
+BM_DATES = sorted({x["date"] for x in BM})
+BM_LAST = BM_DATES[-1]
+
+
+def bm(date, iso=None):
+    rows = [x for x in BM if x["date"] == date and x["name"] != "Euro area"]
+    return rows if iso is None else next(x for x in rows if x["iso_a3"] == iso)
+
+
+def bm_kor_rank(date):
+    rows = sorted(bm(date), key=lambda x: -float(x["dollar_price"]))
+    return [x["iso_a3"] for x in rows].index("KOR") + 1, len(rows)
+
+
+def bm_over_us(date):
+    us = float(bm(date, "USA")["dollar_price"])
+    return [x for x in bm(date) if float(x["dollar_price"]) > us]   # 같은 값은 넣지 않는다
+
+
+B_RANK = [("1~15위", 1, 15), ("16~30위", 16, 30), ("31~45위", 31, 45), ("46위 이하", 46, 999)]
+B_OVER = [("5곳 이하", 0, 5), ("6~15곳", 6, 15), ("16~30곳", 16, 30), ("31곳 이상", 31, 999)]
+for _d in BM_DATES[-3:]:
+    assert band(bm_kor_rank(_d)[0], B_RANK) == band(bm_kor_rank(BM_LAST)[0], B_RANK), \
+        f"{_d} 한국 순위가 다른 보기에 들어갑니다"
+    assert band(len(bm_over_us(_d)), B_OVER) == band(len(bm_over_us(BM_LAST)), B_OVER), \
+        f"{_d} 미국보다 비싼 나라 수가 다른 보기에 들어갑니다"
+
+kr_first, kr_last = bm(BM_DATES[0], "KOR"), bm(BM_LAST, "KOR")
+kr_won_x = float(kr_last["local_price"]) / float(kr_first["local_price"])
+che = bm(BM_LAST, "CHE")
+che_kr = float(che["dollar_price"]) / float(kr_last["dollar_price"])
+us_first = bm(BM_DATES[0], "USA")
+bm_rank, bm_n = bm_kor_rank(BM_LAST)
+over = bm_over_us(BM_LAST)
+assert 0 <= kr_won_x <= 5 and 0 <= che_kr <= 5, "정답이 슬라이더 범위 밖입니다"
+_ym = lambda d: f"{d[:4]}년 {int(d[5:7])}월"
+bm_years = int(BM_LAST[:4]) - int(BM_DATES[0][:4])
+
+topic(
+    "bigmac", "🍔", "빅맥으로 본 세계 물가",
+    f"빅맥 한 개로 본 세계 물가, {BM_DATES[0][:4]}년부터 {BM_LAST[:4]}년까지",
+    "The Economist Big Mac Index", "https://github.com/TheEconomist/big-mac-data",
+    [
+        slider("m1", f"{_ym(BM_LAST)} 한국 빅맥 값(원)은 {_ym(BM_DATES[0])}의 몇 배일까요?",
+               kr_won_x, "배", 0, 5, 0.1,
+               f"이코노미스트 조사 한국 빅맥 {_ym(BM_DATES[0])} {float(kr_first['local_price']):,.0f}원 "
+               f"→ {_ym(BM_LAST)} {float(kr_last['local_price']):,.0f}원 ({kr_won_x:.2f}배)",
+               f"물가가 많이 올랐다는 느낌에 비하면, {bm_years}년 동안 빅맥 값은 두 배가 "
+               "채 안 되게 올랐습니다." if kr_won_x < 2 else
+               f"{bm_years}년 동안 빅맥 값은 {kr_won_x:.1f}배가 되었습니다."),
+        choice("m2", f"{_ym(BM_LAST)} 조사한 {bm_n}개 나라 중 한국 빅맥 값(달러 환산)은 "
+                     "몇 위쯤일까요?",
+               [b[0] for b in B_RANK], band(bm_rank, B_RANK),
+               f"{_ym(BM_LAST)} 달러로 바꾼 빅맥 값을 비싼 순으로 세우면 {bm_n}개 나라(유로 "
+               f"지역 제외) 중 한국 {bm_rank}위 ${float(kr_last['dollar_price']):.2f}",
+               f"최근 세 번 조사에서 한국은 {', '.join(str(bm_kor_rank(d)[0]) for d in BM_DATES[-3:])}위"
+               "였습니다. '한국 물가는 비싸다'는 감과 달리 빅맥은 아래쪽입니다."),
+        slider("m3", f"{_ym(BM_LAST)} 스위스 빅맥 1개 값이면 한국에서 빅맥 몇 개를 살 수 "
+                     "있을까요?",
+               che_kr, "개", 0, 5, 0.1,
+               f"{_ym(BM_LAST)} 스위스 ${float(che['dollar_price']):.2f} ÷ 한국 "
+               f"${float(kr_last['dollar_price']):.2f} = {che_kr:.2f}개 (그날 환율로 달러 환산)",
+               "같은 빵, 같은 고기인데 나라를 건너면 값이 두 배를 훌쩍 넘습니다."
+               if che_kr > 2 else "같은 빵, 같은 고기라도 나라마다 값이 다릅니다."),
+        choice("m4", f"{_ym(BM_LAST)} 빅맥이 미국보다 비싼 나라는 {bm_n - 1}곳 중 몇 곳일까요?",
+               [b[0] for b in B_OVER], band(len(over), B_OVER),
+               f"{_ym(BM_LAST)} 미국 ${float(bm(BM_LAST, 'USA')['dollar_price']):.2f}보다 비싼 "
+               f"나라 {len(over)}곳(같은 값은 뺌)",
+               f"최근 세 번 조사에서 {', '.join(str(len(bm_over_us(d))) for d in BM_DATES[-3:])}곳"
+               "이었습니다. 빅맥의 나라 미국도 세계에서는 비싼 쪽에 속합니다."),
+        slider("m5", f"{_ym(BM_DATES[0])} 미국 빅맥은 몇 달러였을까요?",
+               float(us_first["dollar_price"]), "달러", 0, 10, 0.1,
+               f"이코노미스트 조사 미국 빅맥 {_ym(BM_DATES[0])} ${float(us_first['local_price']):.2f}"
+               f" → {_ym(BM_LAST)} ${float(bm(BM_LAST, 'USA')['local_price']):.2f}",
+               f"{_ym(BM_LAST)} 미국 빅맥은 그때의 "
+               f"{float(bm(BM_LAST, 'USA')['local_price']) / float(us_first['local_price']):.1f}배"
+               "입니다."),
+    ],
+    caveat=f"이 값은 이코노미스트가 {_ym(BM_LAST)} 조사한 빅맥 가격을 그날 환율로 달러로 "
+           f"바꾼 것이라 환율이 움직이면 순위가 바뀌고(한국은 최근 세 번 "
+           f"{'·'.join(str(bm_kor_rank(d)[0]) for d in BM_DATES[-3:])}위), 유로 지역은 나라가 아니라 "
+           "순위에서 뺐으므로, 다른 날 환율로 계산한 값이나 유로 지역을 넣은 다른 가격 비교 "
+           "기사와 다를 수 있습니다.")
+
+
+# ── 19. 설마 이것도 과일? ────────────────────────────────────────
+# 과일·채소 구분은 FAO 원본에 붙은 유엔 상품분류(CPC) 번호의 앞 세 자리를 그대로 따른다.
+# 012 채소 · 013 과일·견과 · 014 기름작물 · 011 곡물. '그 밖의 ○○(n.e.c.)' 같은 묶음
+# 품목은 한 가지 작물이 아니라 순위에서 뺀다. 수박을 과일로 쳤을 때의 순위는
+# 2022~2024년 세 해 모두 2위였다(사과보다 7~8% 많음).
+CPC_GROUP = {"011": "곡물", "012": "채소", "013": "과일·견과", "014": "기름작물"}
+FRUIT_KO = {"Bananas": "바나나", "Apples": "사과", "Watermelons": "수박", "Oranges": "오렌지",
+            "Grapes": "포도", "Strawberries": "딸기", "Olives": "올리브",
+            "Cantaloupes and other melons": "참외·멜론", "Tomatoes": "토마토"}
+WY = WORLD[P_YEAR]
+
+
+def group_of(item):
+    return CPC_GROUP[WY[item]["cpc"][:3]]
+
+
+def fruits(year=P_YEAR, plus=()):
+    """과일(013) 품목을 생산량 순으로. plus 에 적은 품목은 과일인 셈 치고 넣는다."""
+    return sorted(((r["value"], i) for i, r in WORLD[year].items()
+                   if (r["cpc"].startswith("013") or i in plus) and "n.e.c" not in i),
+                  reverse=True)
+
+
+FR = fruits()
+FR_W = fruits(plus=("Watermelons",))
+wm_rank = [i for _, i in FR_W].index("Watermelons") + 1
+wm_next = FR_W[wm_rank][0]                                  # 수박 바로 아래 과일
+for _y in (P_YEAR - 2, P_YEAR - 1):
+    assert [i for _, i in fruits(_y, ("Watermelons",))].index("Watermelons") + 1 == wm_rank, \
+        f"{_y}년 수박의 순위가 다릅니다"
+G_OPTS = ["과일·견과", "채소", "기름작물", "곡물"]
+
+
+def cpc_line(item):
+    return f"유엔 상품분류(CPC) {WY[item]['cpc']} — 앞 세 자리 {WY[item]['cpc'][:3]} = {group_of(item)}"
+
+
+topic(
+    "fruit-or-not", "🍉", "설마 이것도 과일?",
+    "유엔 상품분류로 본 과일과 채소, 그리고 세계 생산량",
+    "FAO FAOSTAT (유엔 상품분류 CPC)", "https://www.fao.org/faostat/",
+    [
+        choice("v1", "유엔 상품분류에서 수박은 어디에 속할까요?",
+               G_OPTS, group_of("Watermelons"), cpc_line("Watermelons"),
+               f"참외·멜론도 같은 {group_of('Cantaloupes and other melons')} 묶음"
+               f"({WY['Cantaloupes and other melons']['cpc']})에 들어 있습니다."),
+        choice("v2", "유엔 상품분류에서 딸기는 어디에 속할까요?",
+               G_OPTS, group_of("Strawberries"), cpc_line("Strawberries"),
+               f"수박은 {group_of('Watermelons')}인데 딸기는 {group_of('Strawberries')}입니다. "
+               "밭에서 기른다고 모두 채소는 아닙니다."),
+        choice("v3", "유엔 상품분류에서 올리브는 어디에 속할까요?",
+               G_OPTS, group_of("Olives"), cpc_line("Olives"),
+               "열매이지만 기름을 짜는 작물이라 과일이 아닌 다른 묶음에 들어 있습니다."),
+        choice("v4", f"{P_YEAR}년 세계에서 가장 많이 생산된 과일(유엔 분류)은?",
+               ["사과", "바나나", "수박", "오렌지"], FRUIT_KO[FR[0][1]],
+               f"{P_YEAR}년 FAO 세계 생산량, 과일(CPC 013) 중 1위 {FRUIT_KO[FR[0][1]]} "
+               f"{FR[0][0]:,.0f}톤{flagged(WY[FR[0][1]])} · 2위 {FRUIT_KO[FR[1][1]]} "
+               f"{FR[1][0]:,.0f}톤{flagged(WY[FR[1][1]])} ('그 밖의 과일' 묶음 제외)",
+               f"수박({WY['Watermelons']['value']:,.0f}톤)은 채소로 분류돼 이 순위에 들지 "
+               "않습니다."),
+        choice("v5", f"{P_YEAR}년 수박을 과일로 친다면, 세계 과일 생산 순위는 몇 위가 될까요?",
+               ["1위", "2위", "3위", "4위 이하"],
+               f"{wm_rank}위" if wm_rank <= 3 else "4위 이하",
+               f"{P_YEAR}년 FAO 세계 생산량 수박 {WY['Watermelons']['value']:,.0f}톤"
+               f"{flagged(WY['Watermelons'])}을 과일(CPC 013)과 함께 세우면 {wm_rank}위 · "
+               f"바로 아래 {FRUIT_KO.get(FR_W[wm_rank][1], FR_W[wm_rank][1])} "
+               f"{wm_next:,.0f}톤",
+               f"수박은 {FRUIT_KO.get(FR_W[wm_rank][1], FR_W[wm_rank][1])}보다 "
+               f"{(WY['Watermelons']['value'] / wm_next - 1) * 100:.0f}% 더 많이 생산됩니다. "
+               f"{P_YEAR - 2}~{P_YEAR}년 세 해 모두 같은 순위였습니다."),
+    ],
+    caveat="과일·채소 구분은 FAO 원본에 붙은 유엔 상품분류(CPC) 번호의 앞 세 자리"
+           "(012 채소 · 013 과일·견과 · 014 기름작물)를 그대로 따른 것이라 장바구니나 "
+           f"나라별 통계의 구분과 다를 수 있고, {P_YEAR}년 세계 합계에는 수박"
+           f"(표시 {WY['Watermelons']['flag']})처럼 FAO 추정값이 섞여 있으며, '그 밖의 ○○' "
+           "묶음 품목은 순위에서 뺐습니다.")
+
 
 # ════════════════════════════════════════════════════════════════
 # 첫 화면 목록에 보일 주제와 그 순서. 여기 없는 주제도 문항 파일은 그대로 만들지만
 # 목록(topics.json)에는 넣지 않아 화면에 나오지 않는다. 다시 보이게 하려면 id 를 더한다
-SHOWN = ["first-place", "korea-rank", "coffee-korea", "animals", "chuncheon-food",
-         "busan-heat"]
+SHOWN = ["first-place", "fruit-or-not", "korea-rank", "coffee-korea", "bigmac", "animals",
+         "chuncheon-food", "busan-heat"]
 
 
 def main() -> None:
