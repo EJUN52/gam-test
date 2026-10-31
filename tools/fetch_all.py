@@ -31,7 +31,7 @@ except (AttributeError, ValueError):
 RAW = Path(__file__).resolve().parent.parent / "data" / "raw"
 # HTTP 헤더는 latin-1 만 담는다. 한글을 넣으면 UnicodeEncodeError 가 난다
 UA = {"User-Agent": "gam-test-class/1.0 (data analysis class)"}
-TIMEOUT = 90
+TIMEOUT = 300
 
 SEOUL = (37.5665, 126.9780)
 BUSAN = (35.1796, 129.0756)
@@ -127,6 +127,12 @@ SOURCES: list[tuple[str, str, str]] = [
      "나라별 작물·가축 생산 1961~ (FAO FAOSTAT QCL 일괄 파일 · ZIP 안에 CSV)",
      "https://bulks-faostat.fao.org/production/"
      "Production_Crops_Livestock_E_All_Data_(Normalized).zip"),
+
+    # 커피공화국. 나라별 수입·수출(1961~). 273MB 라 받는 데 시간이 걸린다
+    ("fao_tcl.zip",
+     "나라별 작물·축산물 수출입 1961~ (FAO FAOSTAT TCL 일괄 파일 · ZIP 안에 CSV)",
+     "https://bulks-faostat.fao.org/production/"
+     "Trade_CropsLivestock_E_All_Data_(Normalized).zip"),
 
     ("wb_pop_all.json",
      "나라별 전체 인구 1961~2024 (World Bank SP.POP.TOTL)",

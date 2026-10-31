@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import collections
 import csv
 import io
 import json
@@ -910,9 +911,19 @@ LIVESTOCK = {"Sheep": "양", "Goats": "염소", "Cattle": "소", "Horses": "말"
 FAO_ISO = {"New Zealand": "NZL", "Mongolia": "MNG", "Republic of Korea": "KOR",
            "World": "WLD"}
 FAO = {}                                    # (나라, 연도, 동물) → (마릿수, 표시)
+# 작물 생산량(톤)도 같은 파일에서 한 번에 읽는다 — 품목코드 → 연도 → 줄 목록.
+# 바나나 486 · 키위 592 · 커피 생두 656 · 카카오콩 661 · 사과 515 · 감 587 ·
+# 배추(양배추 포함) 358 · 딸기 544 · 쌀(벼) 27 · 달걀 1062
+PROD_ITEMS = {"486", "592", "656", "661", "515", "587", "358", "544", "27", "1062"}
+PROD = collections.defaultdict(lambda: collections.defaultdict(list))
 with zipfile.ZipFile(RAW / "fao_qcl.zip") as _z, \
         _z.open("Production_Crops_Livestock_E_All_Data_(Normalized).csv") as _f:
-    for x in csv.DictReader(io.TextIOWrapper(_f, encoding="latin-1")):
+    for x in csv.DictReader(io.TextIOWrapper(_f, encoding="utf-8")):
+        if (x["Element"] == "Production" and x["Item Code"] in PROD_ITEMS
+                and x["Unit"] == "t" and x["Value"]):
+            PROD[x["Item Code"]][int(x["Year"])].append(
+                {"code": int(x["Area Code"]), "area": x["Area"],
+                 "value": float(x["Value"]), "flag": x["Flag"]})
         if (x["Element"] == "Stocks" and x["Area"] in FAO_ISO
                 and x["Item"] in LIVESTOCK and x["Year"] in ("1961", "2024")
                 and x["Value"]):
@@ -989,9 +1000,267 @@ topic(
            "'사람 1명당' 수와 다를 수 있습니다.")
 
 
+# ── 15. 설마 1위가 거기? ─────────────────────────────────────────
+# 순위는 나라만 센다. 지역코드 5000 이상(세계·대륙·'Australia and New Zealand' 같은
+# 묶음)은 빼고, 'China'(코드 351)는 본토·대만·홍콩·마카오를 합친 줄이라 빼서 중국이
+# 두 번 세어지지 않게 한다 — 중국은 'China, mainland'(본토)로 센다.
+P_YEAR = 2024
+WORLD_CODE = 5000
+KO = {"India": "인도", "Philippines": "필리핀", "Ecuador": "에콰도르", "Brazil": "브라질",
+      "New Zealand": "뉴질랜드", "China, mainland": "중국", "Italy": "이탈리아",
+      "Chile": "칠레", "Colombia": "콜롬비아", "Ethiopia": "에티오피아", "Viet Nam": "베트남",
+      "Indonesia": "인도네시아", "Ghana": "가나", "Côte d'Ivoire": "코트디부아르",
+      "Nigeria": "나이지리아", "United States of America": "미국", "Türkiye": "튀르키예",
+      "Republic of Korea": "한국", "Japan": "일본", "Poland": "폴란드",
+      "Russian Federation": "러시아", "Ukraine": "우크라이나", "Azerbaijan": "아제르바이잔",
+      "United Kingdom of Great Britain and Northern Ireland": "영국",
+      "Iran (Islamic Republic of)": "이란", "Madagascar": "마다가스카르",
+      "Sri Lanka": "스리랑카", "Germany": "독일", "Spain": "스페인", "Egypt": "이집트",
+      "Mexico": "멕시코"}
+
+
+def ranking(item, year=P_YEAR):
+    return sorted((r for r in PROD[item][year] if r["code"] < 5000 and r["code"] != 351),
+                  key=lambda r: -r["value"])
+
+
+def ko(r):
+    return KO.get(r["area"], r["area"])
+
+
+def flagged(r):
+    """공식값이 아니면 표시를 붙인다 — E 추정, I 대체, X 외부기관."""
+    return "" if r["flag"] == "A" else f"(FAO 표시 {r['flag']})"
+
+
+ban, kiwi, cof, coc, app = (ranking(i) for i in ("486", "592", "656", "661", "515"))
+app_world = next(r for r in PROD["515"][P_YEAR] if r["code"] == WORLD_CODE)
+app_share = app[0]["value"] / app_world["value"] * 100
+app2_share = app[1]["value"] / app_world["value"] * 100
+
+
+def top2(rs):
+    return (f"1위 {ko(rs[0])} {rs[0]['value']:,.0f}톤{flagged(rs[0])} · "
+            f"2위 {ko(rs[1])} {rs[1]['value']:,.0f}톤{flagged(rs[1])}")
+
+
+topic(
+    "first-place", "🥇", "설마 1위가 거기?",
+    f"{P_YEAR}년 세계 작물 생산량, 1위는 어디일까",
+    "FAO FAOSTAT", "https://www.fao.org/faostat/",
+    [
+        choice("g1", f"{P_YEAR}년 세계에서 바나나를 가장 많이 생산한 나라는?",
+               ["필리핀", "에콰도르", "인도", "브라질"], ko(ban[0]),
+               f"{P_YEAR}년 FAO 바나나 생산량(플랜테인 제외) {top2(ban)}",
+               f"1위는 2위의 {ban[0]['value'] / ban[1]['value']:.1f}배입니다. 바나나 수출로 "
+               "이름난 나라와 가장 많이 기르는 나라는 다릅니다."),
+        choice("g2", f"{P_YEAR}년 키위 생산 세계 1위 나라는?",
+               ["뉴질랜드", "중국", "이탈리아", "칠레"], ko(kiwi[0]),
+               f"{P_YEAR}년 FAO 키위 생산량 {top2(kiwi)}",
+               f"1위는 2위의 {kiwi[0]['value'] / kiwi[1]['value']:.1f}배입니다. 과일 이름이 "
+               "붙은 나라가 가장 많이 기르는 나라는 아닙니다."),
+        choice("g3", f"{P_YEAR}년 세계 커피(생두) 생산 2위 나라는?",
+               ["콜롬비아", "에티오피아", "베트남", "인도네시아"], ko(cof[1]),
+               f"{P_YEAR}년 FAO 커피 생두 생산량 {top2(cof)} · "
+               f"3위 {ko(cof[2])} {cof[2]['value']:,.0f}톤{flagged(cof[2])}",
+               f"2위는 3위의 {cof[1]['value'] / cof[2]['value']:.1f}배입니다. 커피 광고에 "
+               "자주 나오는 나라와 실제 생산량 순서는 다릅니다."),
+        choice("g4", f"{P_YEAR}년 초콜릿 원료 카카오콩 생산 1위 나라는?",
+               ["가나", "코트디부아르", "인도네시아", "나이지리아"], ko(coc[0]),
+               f"{P_YEAR}년 FAO 카카오콩 생산량 {top2(coc)}",
+               f"1위는 2위의 {coc[0]['value'] / coc[1]['value']:.1f}배입니다. 초콜릿 상표에 "
+               "이름이 붙은 나라와 원료를 가장 많이 기르는 나라는 다릅니다."),
+        slider("g5", f"{P_YEAR}년 세계 사과의 몇 %를 1위 나라 한 곳이 생산했을까요?",
+               app_share, "%", 0, 100, 1,
+               f"{P_YEAR}년 FAO 사과 생산량 1위 {ko(app[0])} {app[0]['value']:,.0f}톤 ÷ "
+               f"세계 {app_world['value']:,.0f}톤{flagged(app_world)} = {app_share:.1f}%",
+               f"2위 {ko(app[1])}의 몫은 {app2_share:.1f}%입니다. 한 나라가 세계 사과의 "
+               "큰 몫을 혼자 기릅니다."),
+    ],
+    caveat=f"이 순위는 {P_YEAR}년 FAO 생산량(수출량 아님)으로 매겨 중국은 대만·홍콩을 뺀 "
+           "본토만, 바나나는 플랜테인을 뺀 값만 셌고, 키위 1·2위("
+           f"{ko(kiwi[0])} 표시 {kiwi[0]['flag']} · {ko(kiwi[1])} 표시 {kiwi[1]['flag']})처럼 "
+           "FAO가 추정·대체한 값에 기댄 답이 있어 각국 통계청 발표나 '수출 1위' 기사의 "
+           "숫자와 다를 수 있습니다.")
+
+
+# ── 16. 설마 한국이? ─────────────────────────────────────────────
+# 한국의 정확한 순위는 해마다 바뀐다(감 2022·2024년 2위, 2023년 3위 — 앞뒤 나라와 1% 차이).
+# 그래서 '몇 위?'를 정확히 묻지 않고, 2022~2024년 세 해 모두 같은 보기에 들어가는 순위
+# 구간으로 묻는다. 보기의 경계는 그 확인을 거쳐 정했다. 순위를 매기는 규칙은 15번과 같다.
+def kor_rank(item, year=P_YEAR):
+    rs = ranking(item, year)
+    i = next(i for i, r in enumerate(rs) if r["area"] == "Republic of Korea")
+    return i + 1, rs, i
+
+
+def band(rank, bands):
+    """bands = [(보기, 가장 높은 순위, 가장 낮은 순위)] → 순위가 들어가는 보기."""
+    return next(label for label, lo, hi in bands if lo <= rank <= hi)
+
+
+def kor_line(name, item):
+    rank, rs, i = kor_rank(item)
+    me = rs[i]
+    return (f"{P_YEAR}년 FAO {name} 생산량을 나라별로 줄 세우면 {len(rs)}개국 중 한국 "
+            f"{rank}위 {me['value']:,.0f}톤{flagged(me)} · 1위 {ko(rs[0])} "
+            f"{rs[0]['value']:,.0f}톤{flagged(rs[0])}")
+
+
+B_TOP = [("1위", 1, 1), ("2~3위", 2, 3), ("4~10위", 4, 10), ("11위 이하", 11, 999)]
+B_MID = [("1~5위", 1, 5), ("6~15위", 6, 15), ("16~30위", 16, 30), ("31위 이하", 31, 999)]
+k_pers, k_cab, k_straw, k_egg = (kor_rank(i) for i in ("587", "358", "544", "1062"))
+rice = {r["area"]: r for r in PROD["27"][2006]}["Republic of Korea"], \
+       {r["area"]: r for r in PROD["27"][P_YEAR]}["Republic of Korea"]
+rice_drop = (1 - rice[1]["value"] / rice[0]["value"]) * 100
+kor_pop_up = (POP[("KOR", P_YEAR)] / POP[("KOR", 2006)] - 1) * 100
+assert 0 <= rice_drop <= 60, "쌀 감소율이 슬라이더 범위 밖입니다"
+
+topic(
+    "korea-rank", "🇰🇷", "설마 한국이?",
+    f"{P_YEAR}년 세계 생산 순위 속 한국의 먹거리",
+    "FAO FAOSTAT", "https://www.fao.org/faostat/",
+    [
+        choice("k1", f"{P_YEAR}년 한국의 감 생산량은 세계 몇 위일까요?",
+               [b[0] for b in B_TOP], band(k_pers[0], B_TOP),
+               kor_line("감", "587"),
+               f"1위 {ko(k_pers[1][0])}의 생산량은 한국의 "
+               f"{k_pers[1][0]['value'] / k_pers[1][k_pers[2]]['value']:.0f}배라, 2위부터는 "
+               "한참 아래에서 비슷한 나라끼리 다툽니다. 한국은 그 다툼의 맨 앞줄입니다."),
+        choice("k2", f"{P_YEAR}년 한국의 배추(양배추 포함) 생산량은 세계 몇 위일까요?",
+               [b[0] for b in B_MID], band(k_cab[0], B_MID),
+               kor_line("배추(양배추 포함)", "358"),
+               f"{len(k_cab[1])}개 나라 가운데 상위권입니다. FAO는 배추와 양배추를 한 "
+               "품목으로 셉니다."),
+        choice("k3", f"{P_YEAR}년 한국의 딸기 생산량은 세계 몇 위일까요?",
+               [b[0] for b in B_MID], band(k_straw[0], B_MID),
+               kor_line("딸기", "544"),
+               f"바로 위는 {ko(k_straw[1][k_straw[2] - 1])}, 바로 아래는 "
+               f"{ko(k_straw[1][k_straw[2] + 1])}입니다."),
+        choice("k4", f"{P_YEAR}년 한국의 달걀 생산량(무게)은 세계 몇 위일까요?",
+               [b[0] for b in B_MID], band(k_egg[0], B_MID),
+               kor_line("달걀(무게)", "1062"),
+               f"1위 {ko(k_egg[1][0])}의 생산량은 한국의 "
+               f"{k_egg[1][0]['value'] / k_egg[1][k_egg[2]]['value']:.0f}배입니다. 매일 먹는 "
+               "음식이라고 순위가 높은 것은 아닙니다."),
+        slider("k5", f"2006년과 비교해 {P_YEAR}년 한국의 쌀(벼) 생산량은 몇 % 줄었을까요?",
+               rice_drop, "%", 0, 60, 1,
+               f"FAO 한국 쌀(벼) 생산량 2006년 {rice[0]['value']:,.0f}톤"
+               f"{flagged(rice[0])} → {P_YEAR}년 {rice[1]['value']:,.0f}톤"
+               f"{flagged(rice[1])} ({rice_drop:.1f}% 감소)",
+               f"같은 기간 한국 인구는 {kor_pop_up:.1f}% 늘었습니다(세계은행)."),
+    ],
+    caveat=f"이 순위는 {P_YEAR}년 FAO 값으로 매겨 한국의 "
+           + "·".join(n for n, k in (("감", k_pers), ("배추", k_cab), ("딸기", k_straw),
+                                    ("달걀", k_egg)) if k[1][k[2]]["flag"] != "A")
+           + " 값이 한국 공식 보고가 아닌 FAO 대체·추정값이고, 배추는 양배추와 합친 "
+           f"값이며, 앞뒤 나라와 차이가 작아 감은 2023년에 {kor_rank('587', 2023)[0]}위였을 "
+           "만큼 해마다 순위가 바뀌므로 통계청 발표나 다른 해 기준 순위와 다를 수 "
+           "있습니다.")
+
+
+# ── 17. 커피공화국 한국 ──────────────────────────────────────────
+# 수입량은 FAO 무역 통계(풀면 2.4GB). 커피 수입 줄만 필요해서, 'Coffee' 와 'Import quantity'
+# 가 없는 줄은 csv 로 풀기 전에 건너뛴다. 커피는 **생두만** 세고 볶은 커피는 따로 묻는다
+# (추출물은 원두를 졸인 것이라 무게를 생두와 더할 수 없다). 다시 수출하는 양은 빼지 않는다.
+# 순위 규칙은 15번과 같고, 무역 파일에는 중국 합계 줄이 둘('China' 351,
+# 'China (excluding intra-trade)' 265)이라 둘 다 뺀다.
+CAFE = ("Coffee, green", "Coffee, decaffeinated or roasted")
+IMP = collections.defaultdict(list)          # (품목, 연도) → 나라별 수입량 줄
+with zipfile.ZipFile(RAW / "fao_tcl.zip") as _z, \
+        _z.open("Trade_CropsLivestock_E_All_Data_(Normalized).csv") as _f:
+    _t = io.TextIOWrapper(_f, encoding="utf-8")
+    _h = {h: i for i, h in enumerate(next(csv.reader([_t.readline()])))}
+    for _line in _t:
+        if "Coffee" not in _line or "Import quantity" not in _line:
+            continue
+        x = next(csv.reader([_line]))
+        if x[_h["Item"]] in CAFE and x[_h["Element"]] == "Import quantity" and x[_h["Value"]]:
+            IMP[(x[_h["Item"]], int(x[_h["Year"]]))].append(
+                {"code": int(x[_h["Area Code"]]), "area": x[_h["Area"]],
+                 "value": float(x[_h["Value"]]), "flag": x[_h["Flag"]]})
+
+
+def imp_kor(item, year):
+    return next(r for r in IMP[(item, year)] if r["area"] == "Republic of Korea")
+
+
+g06, g24 = imp_kor(CAFE[0], 2006), imp_kor(CAFE[0], P_YEAR)
+r06, r24 = imp_kor(CAFE[1], 2006), imp_kor(CAFE[1], P_YEAR)
+green_x = g24["value"] / g06["value"]
+roast_x = r24["value"] / r06["value"]
+kg_pp = g24["value"] * 1000 / POP[("KOR", P_YEAR)]
+def imp_ranking(year):
+    return sorted((r for r in IMP[(CAFE[0], year)]
+                   if r["code"] < 5000 and r["code"] not in (351, 265)),
+                  key=lambda r: -r["value"])
+
+
+def imp_rank_of(year):
+    return next(i for i, r in enumerate(imp_ranking(year))
+                if r["area"] == "Republic of Korea") + 1
+
+
+imp_rank = imp_ranking(P_YEAR)
+k_imp = imp_rank_of(P_YEAR) - 1
+cof_world = next(r for r in PROD["656"][P_YEAR] if r["code"] == WORLD_CODE)
+bra = next(r for r in cof if r["area"] == "Brazil")
+bra_share = bra["value"] / cof_world["value"] * 100
+assert 0 <= green_x <= 10 and 0 <= kg_pp <= 10 and 0 <= roast_x <= 30, \
+    "정답이 슬라이더 범위 밖입니다"
+
+topic(
+    "coffee-korea", "☕", "커피공화국 한국",
+    f"한국이 들여온 커피, 2006년과 {P_YEAR}년",
+    "FAO FAOSTAT · World Bank", "https://www.fao.org/faostat/",
+    [
+        slider("c1", f"{P_YEAR}년 한국의 커피 생두 수입량은 2006년의 몇 배일까요?",
+               green_x, "배", 0, 10, 0.1,
+               f"FAO 한국 커피 생두 수입량 2006년 {g06['value']:,.0f}톤{flagged(g06)} → "
+               f"{P_YEAR}년 {g24['value']:,.0f}톤{flagged(g24)} ({green_x:.1f}배)",
+               f"같은 기간 한국 인구는 {kor_pop_up:.1f}% 늘었습니다. 사람보다 커피가 훨씬 "
+               "빨리 늘었습니다."),
+        slider("c2", f"{P_YEAR}년 한국은 사람 1명당 커피 생두를 몇 kg 수입했을까요?",
+               kg_pp, "kg", 0, 10, 0.1,
+               f"{P_YEAR}년 FAO 한국 커피 생두 수입량 {g24['value']:,.0f}톤 ÷ 세계은행 한국 "
+               f"인구 {POP[('KOR', P_YEAR)]:,.0f}명 = {kg_pp:.2f}kg (다시 수출한 양은 빼지 않음)",
+               "한 잔에 쓰는 원두는 몇 그램뿐이라, 1년 치를 kg으로 물으면 감이 잘 오지 "
+               "않습니다."),
+        slider("c3", f"{P_YEAR}년 한국의 볶은 커피 수입량은 2006년의 몇 배일까요?",
+               roast_x, "배", 0, 30, 0.5,
+               f"FAO 한국 볶은 커피(디카페인 포함) 수입량 2006년 {r06['value']:,.0f}톤"
+               f"{flagged(r06)} → {P_YEAR}년 {r24['value']:,.0f}톤{flagged(r24)} "
+               f"({roast_x:.1f}배)",
+               f"같은 기간 생두 수입은 {green_x:.1f}배였습니다. 한국에서 볶던 커피를, 볶아진 "
+               "채로 들여오는 몫이 훨씬 빨리 늘었습니다."),
+        choice("c4", f"{P_YEAR}년 한국의 커피 생두 수입량은 세계 몇 위일까요?",
+               [b[0] for b in B_MID], band(k_imp + 1, B_MID),
+               f"{P_YEAR}년 FAO 커피 생두 수입량을 나라별로 줄 세우면 {len(imp_rank)}개국 중 "
+               f"한국 {k_imp + 1}위 {g24['value']:,.0f}톤 · 1위 {ko(imp_rank[0])} "
+               f"{imp_rank[0]['value']:,.0f}톤{flagged(imp_rank[0])}",
+               f"1위 {ko(imp_rank[0])}의 수입량은 한국의 "
+               f"{imp_rank[0]['value'] / g24['value']:.1f}배입니다. '커피공화국'이라는 별명과 "
+               "세계 순위 사이에는 거리가 있습니다."),
+        slider("c5", f"{P_YEAR}년 세계 커피 생두의 몇 %를 브라질 한 나라가 생산했을까요?",
+               bra_share, "%", 0, 100, 1,
+               f"{P_YEAR}년 FAO 커피 생두 생산량 브라질 {bra['value']:,.0f}톤{flagged(bra)} ÷ "
+               f"세계 {cof_world['value']:,.0f}톤{flagged(cof_world)} = {bra_share:.1f}%",
+               f"2위 {ko(cof[1])}까지 더하면 두 나라가 세계 생두의 "
+               f"{(cof[0]['value'] + cof[1]['value']) / cof_world['value'] * 100:.0f}%를 "
+               "차지합니다."),
+    ],
+    caveat=f"이 숫자는 FAO 수입량(마신 양 아님) 중 생두만 센 것으로 볶은 커피·추출물"
+           "(인스턴트)을 더하지 않았고 다시 수출한 양도 빼지 않았으며, 수입 순위는 중국 "
+           "합계 줄 두 개(코드 351·265)를 빼고 매겨 한국이 2022년 "
+           f"{imp_rank_of(2022)}위 · {P_YEAR}년 {k_imp + 1}위로 해마다 바뀌므로 관세청·"
+           "커피협회 발표나 '1인당 소비' 순위와 다를 수 있습니다.")
+
+
 # ════════════════════════════════════════════════════════════════
-# 첫 화면 목록에서 맨 위에 둘 주제. 적힌 순서대로 앞에 오고, 나머지는 만든 순서를 따른다
-PINNED = ["animals", "chuncheon-food", "busan-heat"]
+# 첫 화면 목록에 보일 주제와 그 순서. 여기 없는 주제도 문항 파일은 그대로 만들지만
+# 목록(topics.json)에는 넣지 않아 화면에 나오지 않는다. 다시 보이게 하려면 id 를 더한다
+SHOWN = ["first-place", "korea-rank", "coffee-korea", "animals", "chuncheon-food",
+         "busan-heat"]
 
 
 def main() -> None:
@@ -1006,11 +1275,11 @@ def main() -> None:
             json.dumps(pack, ensure_ascii=False, indent=2))
         index.append({k: t[k] for k in ("id", "emoji", "title", "blurb",
                                         "source")})
-    index.sort(key=lambda t: PINNED.index(t["id"]) if t["id"] in PINNED
-               else len(PINNED))
+    index = sorted((t for t in index if t["id"] in SHOWN),
+                   key=lambda t: SHOWN.index(t["id"]))
 
     # 제목·부제는 화면을 바꾸며 고친 값을 지킨다 (2장에서 내 제목으로 바꾼다).
-    # 다시 계산해도 내 제목이 «감 테스트»로 돌아가지 않게, 있던 값을 읽어 쓴다
+    # 다시 계산해도 내 제목이 기본값으로 돌아가지 않게, 있던 값을 읽어 쓴다
     old = {}
     if (APP / "topics.json").exists():
         try:
@@ -1018,8 +1287,8 @@ def main() -> None:
         except ValueError:
             old = {}
     io.open(APP / "topics.json", "w", encoding="utf-8").write(json.dumps({
-        "title": old.get("title", "감 테스트"),
-        "subtitle": old.get("subtitle", "숫자에 대한 당신의 감은 몇 점입니까"),
+        "title": old.get("title", "설마 퀴즈"),
+        "subtitle": old.get("subtitle", "설마 그 정도일까? 찍어 보면 데이터가 답합니다"),
         # 등급·문구는 여기서 고칩니다. 코드를 건드릴 일이 아닙니다
         "grades": [
             {"min": 90, "name": "촉이 데이터급", "emoji": "🎯"},

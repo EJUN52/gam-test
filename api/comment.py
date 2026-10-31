@@ -31,7 +31,7 @@ ENDPOINT = ("https://generativelanguage.googleapis.com/v1beta/"
             "models/{model}:generateContent")
 TIMEOUT = 6
 
-PROMPT = """너는 공개 데이터로 만든 숫자 맞히기 퀴즈 '감 테스트'의 촌평 담당이다.
+PROMPT = """너는 공개 데이터로 만든 숫자 맞히기 퀴즈 '설마 퀴즈'의 촌평 담당이다.
 
 사용자가 방금 «{topic}» 주제의 다섯 문항을 풀었다. 결과는 이렇다.
 
@@ -60,7 +60,7 @@ def _ask(score, grade, directions, topic):
     body = {
         "contents": [{
             "parts": [{
-                "text": PROMPT.format(score=score, grade=grade, topic=topic or "감 테스트",
+                "text": PROMPT.format(score=score, grade=grade, topic=topic or "설마 퀴즈",
                                       directions=", ".join(directions))
             }]
         }],
