@@ -67,6 +67,7 @@ function directionOf(q, mine) {
 
 function show(name) {
   Object.entries(views).forEach(([k, el]) => (el.hidden = k !== name));
+  document.body.dataset.view = name;     // 첫 화면만 밝은 색을 쓰려고 (style.css)
   window.scrollTo({ top: 0 });
 }
 

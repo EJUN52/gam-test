@@ -1117,7 +1117,7 @@ kor_pop_up = (POP[("KOR", P_YEAR)] / POP[("KOR", 2006)] - 1) * 100
 assert 0 <= rice_drop <= 60, "쌀 감소율이 슬라이더 범위 밖입니다"
 
 topic(
-    "korea-rank", "🇰🇷", "설마 한국이?",
+    "korea-rank", "🧺", "설마 한국이?",
     f"{P_YEAR}년 세계 생산 순위 속 한국의 먹거리",
     "FAO FAOSTAT", "https://www.fao.org/faostat/",
     [
