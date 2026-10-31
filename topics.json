@@ -52,6 +52,27 @@
   ],
   "topics": [
     {
+      "id": "animals",
+      "emoji": "🐑",
+      "title": "사람보다 많은 동물들",
+      "blurb": "나라별 가축 마릿수와 인구, 1961년과 2024년",
+      "source": "FAO FAOSTAT · World Bank"
+    },
+    {
+      "id": "chuncheon-food",
+      "emoji": "🍗",
+      "title": "춘천은 닭갈비의 도시인가",
+      "blurb": "춘천시 음식점 6,184곳의 이름으로 본 먹거리 지도",
+      "source": "춘천시 요식업소 현황 (공공데이터포털)"
+    },
+    {
+      "id": "busan-heat",
+      "emoji": "🌙",
+      "title": "부산의 밤은 얼마나 더운가",
+      "blurb": "1973년부터 2024년까지, 부산의 열대야",
+      "source": "Open-Meteo Archive (ERA5 재분석)"
+    },
+    {
       "id": "seoul-heat",
       "emoji": "🌡️",
       "title": "서울은 얼마나 더워졌나",

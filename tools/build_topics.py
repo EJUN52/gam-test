@@ -16,6 +16,7 @@ import csv
 import io
 import json
 import sys
+import zipfile
 import datetime as dt
 from collections import Counter
 from pathlib import Path
@@ -39,8 +40,8 @@ def load_json(name):
     return json.load(io.open(RAW / name, encoding="utf-8"))
 
 
-def load_csv(name):
-    return list(csv.DictReader(io.open(RAW / name, encoding="utf-8")))
+def load_csv(name, encoding="utf-8"):
+    return list(csv.DictReader(io.open(RAW / name, encoding=encoding, newline="")))
 
 
 # World Bank·OWID 응답에는 '유럽연합' '고소득국' 같은 **집계치**가 섞여 있다.
@@ -716,8 +717,283 @@ topic(
            "적설과 다릅니다. 기상청의 '첫눈'은 쌓이지 않아도 눈발이 처음 관측된 "
            "날이라, 여기서 센 '1cm 이상 첫날'과 기준이 다릅니다.")
 
+# ── 12. 부산 더위 ────────────────────────────────────────────────
+# 기준은 기상청을 따른다: 폭염 = 일최고 33도 이상, 열대야 = 일최저 25도 이상,
+# 여름 = 6~8월. 서울과 견주는 문항은 같은 출처(ERA5)끼리만 비교한다.
+_b = load_json("busan_heat_plus.json")["daily"]
+B = [{"d": dt.date.fromisoformat(t), "hi": hi, "lo": lo}
+     for t, hi, lo in zip(_b["time"], _b["temperature_2m_max"],
+                          _b["temperature_2m_min"])]
+b_first, b_last = B[0]["d"].year, B[-1]["d"].year
+
+
+def b_years(a, b):
+    return [x for x in B if a <= x["d"].year <= b]
+
+
+b_trop_24 = sum(1 for x in B if x["d"].year == 2024 and x["lo"] >= 25)
+# 비교 기준은 1981~2010년 30년 평균. 1973~1982년과 견주면 ERA5 와 부산 관측소(GSOD)가
+# 서로 다른 보기를 가리켰다 — 초기 ERA5 품질 탓. 30년 평균은 두 자료가 같은 보기를,
+# 경계(1.5·2.5배)에서 멀리 떨어져 가리킨다
+b_trop_base = sum(1 for x in b_years(1981, 2010) if x["lo"] >= 25) / 30
+b_trop_10s = sum(1 for x in b_years(2015, 2024) if x["lo"] >= 25) / 10
+assert b_trop_base > 0, "1981~2010년 열대야가 0일이라 배수를 낼 수 없습니다"
+b_ratio = b_trop_10s / b_trop_base
+s_trop_10s = sum(1 for x in years(2015, 2024) if x["lo"] >= 25) / 10
+more_trop = "부산" if b_trop_10s > s_trop_10s else "서울"
+b_hottest = max(B, key=lambda x: x["hi"])
+
+# 체감온도 문항은 뺐다. Open-Meteo 의 체감온도 공식이 기상청 여름철 체감온도와 달라
+# 문항이 묻는 것과 정답이 재는 것이 어긋나고, '체감 최고'와 '실제 최고'가 서로 다른
+# 시각의 값이라 같은 순간의 차이도 아니었다. 대신 공식 없이 세기만 하는 문항을 둔다
+#
+# 남긴 다섯 문항은 부산·서울 관측소(NOAA GSOD)로 같은 기준을 세어 견줘 고른 것이다.
+# 뺀 문항: 2024년 폭염일 · 폭염 최장 연속일 — ERA5 가 낮 최고기온을 낮게 잡아 관측과
+# 30% 넘게 어긋났다. 첫 열대야 평균 날짜 — 관측으로 세면 정답 보기가 바뀌었다
+
+
+def longest_run(days, hit):
+    """조건을 만족하는 날이 끊기지 않고 이어진 가장 긴 구간 → (일수, 첫날, 끝날)."""
+    best, start, cur = (0, None, None), None, 0
+    for x in days:
+        if hit(x):
+            cur += 1
+            start = x["d"] if cur == 1 else start
+            if cur > best[0]:
+                best = (cur, start, x["d"])
+        else:
+            cur = 0
+    return best
+
+
+b_trop_run = longest_run(b_years(2024, 2024), lambda x: x["lo"] >= 25)
+assert b_trop_run[0] < 60, "연속일이 슬라이더 범위 밖입니다"
+
+b_trop_month = Counter(x["d"].month for x in b_years(2015, 2024) if x["lo"] >= 25)
+b_top_m = max(b_trop_month, key=b_trop_month.get)
+
+topic(
+    "busan-heat", "🌙", "부산의 밤은 얼마나 더운가",
+    f"{b_first}년부터 {b_last}년까지, 부산의 열대야",
+    "Open-Meteo Archive (ERA5 재분석)", "https://open-meteo.com/",
+    [
+        slider("b1", "2024년 부산에서 열대야(밤 최저기온 25도 이상)는 며칠이었을까요?",
+               b_trop_24, "일", 0, 90, 1,
+               f"2024년 일최저기온 25도 이상인 날을 세면 {b_trop_24}일",
+               "바닷가라 밤이 시원할 거라고 생각하지만, 바다는 밤에도 열을 "
+               "붙잡아 둡니다."),
+        # 보기는 배수에 가장 가까운 것이 정답이 되게 경계를 둔다 (서울 h2 와 같은 경계)
+        choice("b2", "1981~2010년(30년 평균)과 2015~2024년, 부산의 열대야는 몇 배 "
+                     "차이일까요?",
+               ["거의 같다", "약 2배", "약 3배", "약 5배"],
+               ["거의 같다", "약 2배", "약 3배", "약 5배"][
+                   0 if b_ratio < 1.5 else 1 if b_ratio < 2.5
+                   else 2 if b_ratio < 4 else 3],
+               f"일최저기온 25도 이상인 날을 해마다 세어 평균하면 "
+               f"1981~2010년 {b_trop_base:.1f}일 → 2015~2024년 {b_trop_10s:.1f}일 "
+               f"({b_ratio:.1f}배)",
+               "'옛날에도 더웠다'는 기억은 유난히 더웠던 몇 밤으로 남지만, "
+               "기록은 해마다 빠짐없이 셉니다."),
+        choice("b3", "2015~2024년, 열대야가 더 많은 도시는?",
+               ["서울", "부산"], more_trop,
+               f"일최저기온 25도 이상인 날의 연평균(2015~2024년, 같은 ERA5 자료) "
+               f"서울 {s_trop_10s:.1f}일 · 부산 {b_trop_10s:.1f}일",
+               "'남쪽 바닷가는 덜 덥다'는 감은 낮 기온 이야기입니다. 밤은 "
+               "다릅니다."),
+        slider("b4", "2024년 부산에서 열대야는 가장 길게 며칠 연속됐을까요?",
+               b_trop_run[0], "일", 0, 60, 1,
+               f"2024년 일최저기온 25도 이상인 날이 끊기지 않고 이어진 가장 긴 구간 "
+               f"{b_trop_run[1]:%m월 %d일}~{b_trop_run[2]:%m월 %d일} "
+               f"{b_trop_run[0]}일",
+               f"그해 열대야 {b_trop_24}일 가운데 {b_trop_run[0]}일이 한 번에 "
+               "이어졌습니다. 더운 밤은 띄엄띄엄 오지 않고 몰려옵니다."),
+        choice("b5", "2015~2024년 부산에서 열대야가 가장 많았던 달은?",
+               ["6월", "7월", "8월", "9월"], f"{b_top_m}월",
+               "2015~2024년 일최저기온 25도 이상인 날을 달별로 세면 "
+               + " · ".join(f"{m}월 {b_trop_month[m]}일" for m in (6, 7, 8, 9)),
+               f"열대야 {sum(b_trop_month.values())}일 중 "
+               f"{b_trop_month[b_top_m] / sum(b_trop_month.values()) * 100:.0f}%가 "
+               f"{b_top_m}월에 몰려 있습니다."),
+    ],
+    caveat="ERA5는 넓은 격자의 재분석 값이라 부산 관측소와 다르게 나옵니다. "
+           f"여기서는 {b_first}~{b_last}년 최고기온이 {b_hottest['hi']:.1f}도"
+           f"({b_hottest['d']:%Y년})인데, 격자가 바다와 육지를 섞어 평균하므로 "
+           "기상청 부산 관측 기록과 다릅니다.")
+
+# ── 13. 춘천 먹거리 ──────────────────────────────────────────────
+# 공공데이터포털 파일은 CP949 다. 업태에 '닭갈비'·'막국수' 분류가 없어 **가게 이름**으로
+# 가른다. 이름에 둘 다 들어간 가게(○○닭갈비막국수)는 양쪽에 다 센다.
+# 동네는 지번 주소의 세 번째 낱말(법정동·읍·면)이다.
+R = load_csv("chuncheon_restaurants.csv", encoding="cp949")
+r_date = R[0]["데이터기준일자"]
+DAK = [x for x in R if "닭갈비" in x["업소명"]]
+MAK = [x for x in R if "막국수" in x["업소명"]]
+both = sum(1 for x in DAK if "막국수" in x["업소명"])
+dm_ratio = len(DAK) / len(MAK)
+
+
+def dong(x):
+    return x["소재지(지번)"].split()[2]
+
+
+dak_dong = Counter(dong(x) for x in DAK)
+top_dong = dak_dong.most_common(1)[0]
+coffee = sum(1 for x in R if x["업태명"] == "커피숍")
+# 모범음식점의 '주된 음식으로 닭갈비 vs 막국수' 문항은 뺐다. 97곳 중 몇 곳 차이라
+# 해마다 지정·취소 한두 곳으로 정답이 뒤집힐 수 있었다. 대신 닭갈비집 전체에서 센다
+sutbul = sum(1 for x in DAK if "숯불" in x["업소명"])
+cheolpan = sum(1 for x in DAK if "철판" in x["업소명"])
+assert sutbul != cheolpan, "'숯불'·'철판' 수가 같아 정답을 정할 수 없습니다"
+assert len(DAK) != coffee, "닭갈비집과 커피숍 수가 같아 정답을 정할 수 없습니다"
+# 한 줄은 가게가 아니라 신고 한 건이다. 층이나 업종(음식점·제과점)을 따로 신고하면 여러 줄
+r_multi = sum(1 for v in Counter((x["업소명"].strip(), x["소재지(지번)"].strip())
+                                 for x in R).values() if v > 1)
+
+topic(
+    "chuncheon-food", "🍗", "춘천은 닭갈비의 도시인가",
+    f"춘천시 음식점 {len(R):,}곳의 이름으로 본 먹거리 지도",
+    "춘천시 요식업소 현황 (공공데이터포털)",
+    "https://www.data.go.kr/data/15003349/fileData.do",
+    [
+        slider("f1", "춘천에서 이름에 '닭갈비'가 들어간 음식점은 몇 곳일까요?",
+               len(DAK), "곳", 0, 600, 10,
+               f"{r_date} 기준 춘천시 요식업소 {len(R):,}곳 중 업소명에 '닭갈비'가 "
+               f"들어간 곳 {len(DAK)}곳",
+               f"전체 음식점의 {len(DAK) / len(R) * 100:.1f}%입니다. 도시의 얼굴이 되는 "
+               "음식도 가게 수로는 일부입니다."),
+        # 보기는 배수에 가장 가까운 것이 정답이 되게 경계를 둔다 (서울 h2 와 같은 경계)
+        choice("f2", "이름에 '닭갈비'가 들어간 가게는 '막국수'가 들어간 가게의 몇 배일까요?",
+               ["거의 같다", "약 2배", "약 3배", "약 5배"],
+               ["거의 같다", "약 2배", "약 3배", "약 5배"][
+                   0 if dm_ratio < 1.5 else 1 if dm_ratio < 2.5
+                   else 2 if dm_ratio < 4 else 3],
+               f"{r_date} 기준 업소명에 '닭갈비' {len(DAK)}곳 · '막국수' {len(MAK)}곳 "
+               f"({dm_ratio:.1f}배). 둘 다 들어간 {both}곳은 양쪽에 다 셌습니다",
+               f"{both}곳은 이름에 닭갈비와 막국수를 함께 걸었습니다. 춘천에서 둘은 "
+               "경쟁자라기보다 한 상에 오르는 짝입니다."),
+        choice("f3", "춘천에서 이름에 '닭갈비'가 들어간 가게가 가장 많은 동네는?",
+               ["조양동", "남산면", "퇴계동", "석사동"], top_dong[0],
+               f"{r_date} 기준 업소명에 '닭갈비'가 들어간 가게를 지번 주소의 동·읍·면으로 "
+               "세면 " + " · ".join(f"{d} {dak_dong[d]}곳"
+                                   for d in ("조양동", "남산면", "퇴계동", "석사동")),
+               "'닭갈비 골목'으로 이름난 곳(명동이 있는 조양동)과 닭갈비집이 가장 많은 "
+               "곳은 같지 않을 수 있습니다. 골목은 관광의 얼굴이고, 가게 수는 "
+               "사람이 사는 동네를 따라갑니다."),
+        choice("f4", "춘천에 닭갈비집과 커피숍 중 어느 쪽이 더 많을까요?",
+               ["닭갈비집", "커피숍"], "닭갈비집" if len(DAK) > coffee else "커피숍",
+               f"{r_date} 기준 업소명에 '닭갈비'가 들어간 곳 {len(DAK)}곳 · 업태가 "
+               f"'커피숍'인 곳 {coffee}곳",
+               "도시를 대표하는 음식과 사람들이 매일 들르는 가게는 다릅니다."),
+        # 실제 조리 방식이 아니라 '이름에 내건 말'을 묻는다. 이름에 둘 다 없는 가게가 대부분이다
+        choice("f5", "춘천 닭갈비집 이름에 더 많이 들어간 말은?",
+               ["숯불", "철판"], "숯불" if sutbul > cheolpan else "철판",
+               f"{r_date} 기준 업소명에 '닭갈비'가 들어간 {len(DAK)}곳 중 '숯불'이 들어간 곳 "
+               f"{sutbul}곳 · '철판'이 들어간 곳 {cheolpan}곳 "
+               f"(둘 다 없는 곳 {len(DAK) - sutbul - cheolpan}곳)",
+               "이름은 조리 방식의 통계가 아니라 간판의 선택입니다. 흔한 방식은 굳이 "
+               "내걸지 않고, 남과 다른 점을 이름에 씁니다."),
+    ],
+    caveat=f"이 숫자는 {r_date} 기준 춘천시 신고 목록에서 이름에 '닭갈비'·'막국수'가 "
+           "들어간 줄을 센 것이라, 이름에 그 말이 없는 닭갈비집은 빠지고, 한 가게가 "
+           f"층이나 업종별로 따로 신고한 경우(같은 이름·지번 {r_multi}건)는 여러 번 "
+           "세어지며, 목록에 휴·폐업 여부가 없고 동네는 지번 주소의 법정동으로 나눴기 "
+           "때문에 지도 앱이나 행정동 기준 집계의 가게 수와 다를 수 있습니다.")
+
+
+# ── 14. 사람보다 많은 동물들 ─────────────────────────────────────
+# FAO 는 ZIP 을 풀지 않고 안의 CSV 를 읽는다. 'Stocks'(그해 기르고 있는 마릿수) 줄만 쓴다.
+# 같은 표에 '소와 물소' '양과 염소' '가금류' 같은 **합계 항목**이 개별 동물과 나란히 있어
+# 그대로 세면 두 번 세어진다. 벌(Bees)은 마리가 아니라 벌통 수라 뺀다.
+# 닭은 1,000마리 단위로 적혀 있어 Unit 을 보고 곱한다.
+LIVESTOCK = {"Sheep": "양", "Goats": "염소", "Cattle": "소", "Horses": "말",
+             "Camels": "낙타", "Swine / pigs": "돼지", "Chickens": "닭", "Asses": "당나귀"}
+FAO_ISO = {"New Zealand": "NZL", "Mongolia": "MNG", "Republic of Korea": "KOR",
+           "World": "WLD"}
+FAO = {}                                    # (나라, 연도, 동물) → (마릿수, 표시)
+with zipfile.ZipFile(RAW / "fao_qcl.zip") as _z, \
+        _z.open("Production_Crops_Livestock_E_All_Data_(Normalized).csv") as _f:
+    for x in csv.DictReader(io.TextIOWrapper(_f, encoding="latin-1")):
+        if (x["Element"] == "Stocks" and x["Area"] in FAO_ISO
+                and x["Item"] in LIVESTOCK and x["Year"] in ("1961", "2024")
+                and x["Value"]):
+            scale = 1000 if x["Unit"].startswith("1000") else 1
+            FAO[(x["Area"], int(x["Year"]), x["Item"])] = (float(x["Value"]) * scale,
+                                                         x["Flag"])
+POP = {(r["countryiso3code"], int(r["date"])): r["value"]
+       for r in load_json("wb_pop_all.json")[1] if r["value"]}
+
+
+def per_person(area, item, year=2024):
+    return FAO[(area, year, item)][0] / POP[(FAO_ISO[area], year)]
+
+
+nz_sheep = per_person("New Zealand", "Sheep")
+mn_pop = POP[("MNG", 2024)]
+mn_more = [LIVESTOCK[i] for i in LIVESTOCK
+           if ("Mongolia", 2024, i) in FAO and FAO[("Mongolia", 2024, i)][0] > mn_pop]
+mn_horse = per_person("Mongolia", "Horses")
+kr_chicken = per_person("Republic of Korea", "Chickens")
+w_chicken = per_person("World", "Chickens")
+w_flag = FAO[("World", 2024, "Chickens")][1]
+kr_pig_61 = FAO[("Republic of Korea", 1961, "Swine / pigs")][0]
+kr_pig_24 = FAO[("Republic of Korea", 2024, "Swine / pigs")][0]
+kr_pig_x = kr_pig_24 / kr_pig_61
+kr_pop_x = POP[("KOR", 2024)] / POP[("KOR", 1961)]
+assert 0 <= nz_sheep <= 20 and 0 <= kr_chicken <= 10 and 0 <= kr_pig_x <= 20, \
+    "정답이 슬라이더 범위 밖입니다"
+mn_band = "4종 이상" if len(mn_more) >= 4 else f"{len(mn_more)}종"
+
+topic(
+    "animals", "🐑", "사람보다 많은 동물들",
+    "나라별 가축 마릿수와 인구, 1961년과 2024년",
+    "FAO FAOSTAT · World Bank", "https://www.fao.org/faostat/",
+    [
+        slider("v1", "2024년 뉴질랜드에는 사람 1명당 양이 몇 마리일까요?",
+               nz_sheep, "마리", 0, 20, 0.5,
+               f"2024년 FAO 뉴질랜드 양 {FAO[('New Zealand', 2024, 'Sheep')][0]:,.0f}마리 ÷ "
+               f"세계은행 뉴질랜드 인구 {POP[('NZL', 2024)]:,.0f}명 = {nz_sheep:.1f}마리",
+               "'양이 사람보다 훨씬 많은 나라'라는 말이 너무 유명해서 수십 배쯤으로 "
+               "부풀려 기억하기 쉽습니다."),
+        choice("v2", "2024년 몽골에서 사람보다 많은 가축은 몇 종일까요?",
+               ["1종", "2종", "3종", "4종 이상"], mn_band,
+               f"2024년 양·염소·소·말·낙타·돼지·닭·당나귀 중 FAO 마릿수가 몽골 인구 "
+               f"{mn_pop:,.0f}명보다 많은 종: {', '.join(mn_more)}",
+               f"몽골에서는 말도 사람 1명당 {mn_horse:.1f}마리입니다. 초원의 나라에서는 "
+               "사람이 소수입니다."),
+        slider("v3", "2024년 한국에는 사람 1명당 닭이 몇 마리일까요?",
+               kr_chicken, "마리", 0, 10, 0.1,
+               f"2024년 FAO 한국 닭 {FAO[('Republic of Korea', 2024, 'Chickens')][0]:,.0f}마리 ÷ "
+               f"세계은행 한국 인구 {POP[('KOR', 2024)]:,.0f}명 = {kr_chicken:.1f}마리",
+               "닭은 눈에 보이지 않는 곳에서 길러집니다. 보이지 않는 것은 적게 "
+               "어림하게 됩니다."),
+        # 보기는 배수에 가장 가까운 것이 정답이 되게 경계를 둔다 (서울 h2 와 같은 경계)
+        choice("v4", "2024년 지구의 닭은 사람의 몇 배일까요?",
+               ["거의 같다", "약 2배", "약 3배", "약 5배"],
+               ["거의 같다", "약 2배", "약 3배", "약 5배"][
+                   0 if w_chicken < 1.5 else 1 if w_chicken < 2.5
+                   else 2 if w_chicken < 4 else 3],
+               f"2024년 FAO 세계 닭 {FAO[('World', 2024, 'Chickens')][0]:,.0f}마리 ÷ "
+               f"세계은행 세계 인구 {POP[('WLD', 2024)]:,.0f}명 = {w_chicken:.1f}배",
+               f"지금 지구에서는 사람 1명마다 닭 {w_chicken:.1f}마리가 길러지고 있는 "
+               "셈입니다."),
+        slider("v5", "1961년과 비교해 2024년 한국의 돼지는 몇 배로 늘었을까요?",
+               kr_pig_x, "배", 0, 20, 0.5,
+               f"FAO 한국 돼지 1961년 {kr_pig_61:,.0f}마리 → 2024년 {kr_pig_24:,.0f}마리 "
+               f"({kr_pig_x:.1f}배)",
+               f"같은 기간 한국 인구는 {kr_pop_x:.1f}배 늘었습니다. 돼지는 사람보다 "
+               f"{kr_pig_x / kr_pop_x:.1f}배 빠르게 늘었습니다."),
+    ],
+    caveat="마릿수는 한 해 중 한 시점에 기르고 있는 수라 1년 동안 도축되는 수(닭은 "
+           "훨씬 큼)와 다르고, 나라별 값은 각국이 FAO에 보고한 값이지만 세계 합계는 "
+           f"FAO 추정값(표시 '{w_flag}')이며, 인구는 세계은행 값이라 다른 통계의 "
+           "'사람 1명당' 수와 다를 수 있습니다.")
+
 
 # ════════════════════════════════════════════════════════════════
+# 첫 화면 목록에서 맨 위에 둘 주제. 적힌 순서대로 앞에 오고, 나머지는 만든 순서를 따른다
+PINNED = ["animals", "chuncheon-food", "busan-heat"]
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     index = []
@@ -730,6 +1006,8 @@ def main() -> None:
             json.dumps(pack, ensure_ascii=False, indent=2))
         index.append({k: t[k] for k in ("id", "emoji", "title", "blurb",
                                         "source")})
+    index.sort(key=lambda t: PINNED.index(t["id"]) if t["id"] in PINNED
+               else len(PINNED))
 
     # 제목·부제는 화면을 바꾸며 고친 값을 지킨다 (2장에서 내 제목으로 바꾼다).
     # 다시 계산해도 내 제목이 «감 테스트»로 돌아가지 않게, 있던 값을 읽어 쓴다
